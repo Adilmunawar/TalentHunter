@@ -1,0 +1,168 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 216 72% 14%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 216 72% 14%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 216 72% 14%;
+
+    --primary: 167 80% 43%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 180 63% 57%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 167 80% 43%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 167 80% 43%;
+
+    --radius: 0.75rem;
+    
+    --gradient-primary: linear-gradient(135deg, hsl(200 85% 45%), hsl(167 80% 43%));
+    --gradient-secondary: linear-gradient(135deg, hsl(167 80% 43%), hsl(180 63% 57%));
+    --gradient-subtle: linear-gradient(180deg, hsl(0 0% 100%), hsl(210 40% 98%));
+    --gradient-mesh: 
+      radial-gradient(at 0% 0%, hsl(167 80% 43% / 0.1) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsl(180 63% 57% / 0.1) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsl(200 85% 45% / 0.1) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsl(167 80% 43% / 0.1) 0px, transparent 50%);
+    --shadow-elegant: 0 10px 40px -10px hsl(167 80% 43% / 0.2);
+    --shadow-glow: 0 0 30px hsl(167 80% 43% / 0.15);
+    --shadow-premium: 0 20px 60px -15px hsl(167 80% 43% / 0.3);
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 216 72% 14%;
+
+    --sidebar-primary: 216 72% 14%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 210 40% 96%;
+
+    --sidebar-accent-foreground: 216 72% 14%;
+
+    --sidebar-border: 214 32% 91%;
+
+    --sidebar-ring: 167 80% 43%;
+  }
+
+  .dark {
+    --background: 216 72% 14%;
+    --foreground: 0 0% 100%;
+
+    --card: 216 65% 18%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 216 65% 18%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 167 80% 43%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 180 63% 57%;
+    --secondary-foreground: 216 72% 14%;
+
+    --muted: 215 32% 25%;
+    --muted-foreground: 210 40% 80%;
+
+    --accent: 167 80% 43%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 63% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 32% 25%;
+    --input: 215 32% 25%;
+    --ring: 167 80% 43%;
+    
+    --gradient-primary: linear-gradient(135deg, hsl(200 85% 45%), hsl(167 80% 43%));
+    --gradient-secondary: linear-gradient(135deg, hsl(167 80% 43%), hsl(180 63% 57%));
+    --gradient-subtle: linear-gradient(180deg, hsl(216 72% 14%), hsl(216 65% 18%));
+    --gradient-mesh: 
+      radial-gradient(at 0% 0%, hsl(167 80% 43% / 0.2) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsl(180 63% 57% / 0.2) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsl(200 85% 45% / 0.2) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsl(167 80% 43% / 0.2) 0px, transparent 50%);
+    --shadow-elegant: 0 10px 40px -10px hsl(167 80% 43% / 0.3);
+    --shadow-glow: 0 0 30px hsl(167 80% 43% / 0.25);
+    --shadow-premium: 0 20px 60px -15px hsl(167 80% 43% / 0.4);
+    --sidebar-background: 216 72% 14%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 167 80% 43%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 32% 25%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 215 32% 25%;
+    --sidebar-ring: 167 80% 43%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .bg-mesh {
+    background: var(--gradient-mesh);
+  }
+  
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+  
+  .animate-float-delayed {
+    animation: float 8s ease-in-out infinite;
+    animation-delay: 1s;
+  }
+  
+  @keyframes float {
+    0%, 100% {
+      transform: translateY(0px) translateX(0px);
+    }
+    50% {
+      transform: translateY(-20px) translateX(10px);
+    }
+  }
+  
+  .animate-pulse-glow {
+    animation: pulse-glow 3s ease-in-out infinite;
+  }
+  
+  @keyframes pulse-glow {
+    0%, 100% {
+      opacity: 0.5;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.8;
+      transform: scale(1.05);
+    }
+  }
+}
