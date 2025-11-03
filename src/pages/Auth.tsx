@@ -52,7 +52,7 @@ const Auth = () => {
       <div className="w-full max-w-md animate-fade-in relative z-10">
         <div className="text-center mb-8">
           <img src={talentProLogo} alt="Talent Pro Logo" className="h-20 w-auto mx-auto mb-4" />
-          <h1 className="text-3xl font-bold text-foreground">Talent Radar</h1>
+          <h1 className="text-3xl font-bold text-foreground">Talent Pro Hunter</h1>
           <p className="text-muted-foreground mt-2">AI-Powered Recruitment Platform</p>
         </div>
 
