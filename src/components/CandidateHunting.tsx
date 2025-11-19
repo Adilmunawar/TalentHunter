@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
+import { ProcessingLogsDialog } from '@/components/ProcessingLogsDialog';
 import {
   Pagination,
   PaginationContent,
@@ -44,6 +45,14 @@ export const CandidateHunting = () => {
   const [currentSearchId, setCurrentSearchId] = useState<string | null>(null);
   const [searchProgress, setSearchProgress] = useState(0);
   const [searchStatus, setSearchStatus] = useState('');
+  const [processingLogs, setProcessingLogs] = useState<Array<{
+    timestamp: string;
+    level: 'info' | 'error' | 'success';
+    message: string;
+  }>>([]);
+  const [showLogsDialog, setShowLogsDialog] = useState(false);
+  const [processingComplete, setProcessingComplete] = useState(false);
+  const [processingError, setProcessingError] = useState(false);
   const { toast } = useToast();
   
   const itemsPerPage = 10;
@@ -334,6 +343,11 @@ export const CandidateHunting = () => {
     });
   };
 
+  const addLog = (level: 'info' | 'error' | 'success', message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    setProcessingLogs(prev => [...prev, { timestamp, level, message }]);
+  };
+
   const handleSearch = async () => {
     if (!jobDescription.trim()) {
       toast({
@@ -344,44 +358,91 @@ export const CandidateHunting = () => {
       return;
     }
 
+    // Reset state
     setSearching(true);
     setSearchProgress(0);
     setSearchStatus('Initializing search...');
+    setProcessingLogs([]);
+    setShowLogsDialog(true);
+    setProcessingComplete(false);
+    setProcessingError(false);
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated');
 
-      setSearchStatus('Analyzing candidates with AI...');
-      setSearchProgress(10);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('No active session found');
 
-      // Simulate progress during the async operation
-      const progressInterval = setInterval(() => {
-        setSearchProgress(prev => {
-          if (prev < 85) return prev + 5;
-          return prev;
-        });
-      }, 1000);
+      const response = await fetch(
+        'https://olkbhjyfpdvcovtuekzt.supabase.co/functions/v1/match-candidates',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ jobDescription }),
+        }
+      );
 
-      const { data, error } = await supabase.functions.invoke('match-candidates', {
-        body: { jobDescription },
-      });
-
-      clearInterval(progressInterval);
-      setSearchProgress(90);
-      setSearchStatus('Processing results...');
-
-      if (error) {
-        throw new Error(error.message || 'Failed to match candidates');
+      if (!response.ok || !response.body) {
+        throw new Error('Failed to start processing');
       }
 
-      const matches = data.matches || [];
-      const total = data.total || 0;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalData: any = null;
 
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim() || line.startsWith(':')) continue;
+          
+          if (line.startsWith('data:')) {
+            const data = JSON.parse(line.slice(5).trim());
+            
+            if (data.level && data.message) {
+              addLog(data.level, data.message);
+              setSearchStatus(data.message);
+            }
+            
+            if (data.current !== undefined && data.total !== undefined) {
+              setSearchProgress((data.current / data.total) * 100);
+            }
+            
+            if (data.matches) {
+              finalData = data;
+            }
+            
+            if (data.message && !data.level) {
+              if (data.message.includes('error') || data.message.includes('failed')) {
+                throw new Error(data.message);
+              }
+            }
+          }
+        }
+      }
+
+      if (!finalData || !finalData.matches) {
+        throw new Error('No results received');
+      }
+
+      const matches = finalData.matches;
+      const total = finalData.total || 0;
+
+      addLog('success', `Successfully matched ${matches.length} candidates!`);
       console.log('Received matches from edge function:', matches.length);
-      console.log('Sample match structure:', matches[0]);
 
       // Save search to database
+      addLog('info', 'Saving search to database...');
       const { data: searchData, error: searchError } = await supabase
         .from('job_searches')
         .insert({
@@ -393,11 +454,11 @@ export const CandidateHunting = () => {
         .single();
 
       if (searchError) {
-        console.error('Error saving search:', searchError);
+        addLog('error', `Database error: ${searchError.message}`);
         throw searchError;
       }
 
-      console.log('Search saved with ID:', searchData.id);
+      addLog('success', `Search saved with ID: ${searchData.id}`);
 
       // Save all candidate matches
       const candidateRecords = matches.map((match: CandidateMatch) => ({
@@ -408,42 +469,44 @@ export const CandidateHunting = () => {
         candidate_phone: match.phone_number,
         candidate_location: match.location,
         job_role: match.job_title,
-        experience_years: match.years_of_experience,
+        experience_years: match.years_of_experience !== null 
+          ? Math.round(match.years_of_experience * 100) / 100 
+          : null,
         match_score: match.matchScore,
         reasoning: match.reasoning,
         key_strengths: match.strengths || [],
         potential_concerns: match.concerns || [],
       }));
 
-      console.log('Saving candidate records:', candidateRecords.length);
-      console.log('Sample candidate record:', candidateRecords[0]);
+      addLog('info', `Saving ${candidateRecords.length} candidate records...`);
 
-      if (candidateRecords.length > 0) {
-        const { error: matchesError } = await supabase
-          .from('candidate_matches')
-          .insert(candidateRecords);
+      const { error: candidatesError } = await supabase
+        .from('candidate_matches')
+        .insert(candidateRecords);
 
-        if (matchesError) {
-          console.error('Error saving candidate matches:', matchesError);
-          throw matchesError;
-        }
-        
-        console.log('Successfully saved all candidate matches');
+      if (candidatesError) {
+        addLog('error', `Error saving candidates: ${candidatesError.message}`);
+        throw candidatesError;
       }
+
+      addLog('success', 'All candidate records saved successfully!');
+      setSearchProgress(100);
+      setSearchStatus('Search completed!');
+      setProcessingComplete(true);
 
       setMatches(matches);
       setTotalCandidates(total);
-      setCurrentPage(1);
       setCurrentSearchId(searchData.id);
-      setSearchProgress(100);
-      setSearchStatus('Search complete!');
+      setCurrentPage(1);
 
       toast({
         title: 'Search Complete!',
-        description: `Ranked ${matches.length} candidates from ${total} total resumes`,
+        description: `Found ${matches.length} matching candidates`,
       });
     } catch (error) {
       console.error('Search error:', error);
+      setProcessingError(true);
+      addLog('error', error instanceof Error ? error.message : 'Unknown error occurred');
       toast({
         title: 'Search Failed',
         description: error instanceof Error ? error.message : 'Failed to search candidates',
@@ -451,10 +514,6 @@ export const CandidateHunting = () => {
       });
     } finally {
       setSearching(false);
-      setTimeout(() => {
-        setSearchProgress(0);
-        setSearchStatus('');
-      }, 2000);
     }
   };
 
@@ -747,6 +806,20 @@ export const CandidateHunting = () => {
         </div>
       );
       })()}
+
+      <ProcessingLogsDialog
+        open={showLogsDialog}
+        logs={processingLogs}
+        progress={searchProgress}
+        status={searchStatus}
+        isComplete={processingComplete}
+        hasError={processingError}
+        onClose={() => {
+          setShowLogsDialog(false);
+          setProcessingComplete(false);
+          setProcessingError(false);
+        }}
+      />
     </div>
   );
 };

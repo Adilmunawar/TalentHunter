@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import talentProLogo from '@/assets/talent-pro-logo.png';
 import { Loader2 } from 'lucide-react';
+import Footer from '@/components/Footer';
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -38,7 +39,7 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen relative overflow-hidden flex items-center justify-center p-4">
+    <div className="min-h-screen relative overflow-hidden flex flex-col">
       {/* Animated Background */}
       <div className="absolute inset-0 bg-gradient-to-br from-background via-background to-muted/20">
         <div className="absolute inset-0 bg-mesh" />
@@ -49,10 +50,11 @@ const Auth = () => {
         <div className="absolute top-1/2 right-1/3 w-48 h-48 bg-accent/20 rounded-full blur-3xl animate-pulse-glow" />
       </div>
       
-      <div className="w-full max-w-md animate-fade-in relative z-10">
+      <div className="flex-1 flex items-center justify-center p-4 relative z-10">
+        <div className="w-full max-w-md animate-fade-in">
         <div className="text-center mb-8">
-          <img src={talentProLogo} alt="Talent Pro Logo" className="h-20 w-auto mx-auto mb-4" />
-          <h1 className="text-3xl font-bold text-foreground">Talent Pro Hunter</h1>
+          <img src={talentProLogo} alt="AdiLink Logo" className="h-20 w-auto mx-auto mb-4" />
+          <h1 className="text-3xl font-bold text-foreground">AdiLink</h1>
           <p className="text-muted-foreground mt-2">AI-Powered Recruitment Platform</p>
         </div>
 
@@ -156,7 +158,9 @@ const Auth = () => {
         <p className="text-center text-sm text-muted-foreground mt-4">
           By continuing, you agree to our Terms of Service and Privacy Policy
         </p>
+        </div>
       </div>
+      <Footer />
     </div>
   );
 };

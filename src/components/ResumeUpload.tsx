@@ -1,50 +1,188 @@
 import { useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { Upload, FileText, CheckCircle, Loader2 } from 'lucide-react';
+import { Upload, FileText, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
+import { ProcessingLogsDialog } from '@/components/ProcessingLogsDialog';
+import { supabase } from '@/integrations/supabase/client';
 
 export const ResumeUpload = () => {
   const [uploading, setUploading] = useState(false);
   const [uploadedCount, setUploadedCount] = useState(0);
+  const [showLogsDialog, setShowLogsDialog] = useState(false);
+  const [processingLogs, setProcessingLogs] = useState<Array<{ timestamp: string; level: 'info' | 'error' | 'success'; message: string }>>([]);
+  const [progress, setProgress] = useState(0);
+  const [isComplete, setIsComplete] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [totalFiles, setTotalFiles] = useState(0);
+  const [processedFiles, setProcessedFiles] = useState(0);
+  const [droppedFiles, setDroppedFiles] = useState(0);
   const { toast } = useToast();
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
+    // Pre-validate files
+    const filesArray = Array.from(files);
+    const validFiles: File[] = [];
+    const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+    const ALLOWED_TYPES = ['application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    
+    for (const file of filesArray) {
+      if (file.size > MAX_FILE_SIZE) {
+        toast({
+          title: 'File Too Large',
+          description: `${file.name} exceeds 20MB limit`,
+          variant: 'destructive',
+        });
+        continue;
+      }
+      
+      if (!ALLOWED_TYPES.includes(file.type) && !file.name.match(/\.(pdf|txt|doc|docx)$/i)) {
+        toast({
+          title: 'Invalid File Type',
+          description: `${file.name} is not a supported format`,
+          variant: 'destructive',
+        });
+        continue;
+      }
+      
+      validFiles.push(file);
+    }
+    
+    if (validFiles.length === 0) {
+      toast({
+        title: 'No Valid Files',
+        description: 'Please upload PDF, TXT, DOC, or DOCX files under 20MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setUploading(true);
+    setShowLogsDialog(true);
+    setProcessingLogs([]);
+    setProgress(0);
+    setIsComplete(false);
+    setHasError(false);
+    setTotalFiles(validFiles.length);
+    setProcessedFiles(0);
+    setDroppedFiles(0);
+    let successCount = 0;
 
     try {
-      for (const file of Array.from(files)) {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('fileName', file.name);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('No active session found');
 
-        const { data, error } = await supabase.functions.invoke('parse-resume', {
-          body: formData,
-        });
-
-        if (error) {
-          throw new Error(error.message || 'Failed to upload resume');
-        }
-
-        console.log('Resume uploaded:', data);
-        setUploadedCount(prev => prev + 1);
+      // Process files in parallel batches of 3
+      const BATCH_SIZE = 3;
+      const batches: File[][] = [];
+      for (let i = 0; i < validFiles.length; i += BATCH_SIZE) {
+        batches.push(validFiles.slice(i, i + BATCH_SIZE));
       }
 
-      toast({
-        title: 'Success!',
-        description: `Successfully uploaded and parsed ${files.length} resume(s)`,
-      });
+      for (const batch of batches) {
+        // Process batch in parallel
+        const batchPromises = batch.map(async (file) => {
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('fileName', file.name);
 
+          try {
+            const response = await fetch(
+              'https://olkbhjyfpdvcovtuekzt.supabase.co/functions/v1/parse-resume',
+              {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${session.access_token}`,
+                },
+                body: formData,
+              }
+            );
+
+            if (!response.ok || !response.body) {
+              throw new Error(`Upload failed for ${file.name}`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let fileSuccess = false;
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                if (!line.trim() || line.startsWith(':')) continue;
+                if (line.startsWith('data:')) {
+                  const data = JSON.parse(line.slice(5).trim());
+                  
+                  if (data.level && data.message) {
+                    setProcessingLogs(prev => [...prev, {
+                      timestamp: new Date().toLocaleTimeString(),
+                      level: data.level,
+                      message: data.message
+                    }]);
+                  }
+                  
+                  if (data.success) {
+                    fileSuccess = true;
+                  }
+                }
+              }
+            }
+
+            return { success: fileSuccess, fileName: file.name };
+          } catch (error) {
+            setProcessingLogs(prev => [...prev, {
+              timestamp: new Date().toLocaleTimeString(),
+              level: 'error',
+              message: `Failed: ${file.name}`
+            }]);
+            return { success: false, fileName: file.name };
+          }
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+        
+        let failedInBatch = 0;
+        batchResults.forEach(result => {
+          if (result.success) {
+            successCount++;
+          } else {
+            failedInBatch++;
+          }
+          setProcessedFiles(prev => prev + 1);
+        });
+
+        setDroppedFiles(prev => prev + failedInBatch);
+        const currentProcessed = successCount + failedInBatch;
+        setProgress((currentProcessed / validFiles.length) * 100);
+      }
+
+      setUploadedCount(prev => prev + successCount);
+      setIsComplete(true);
+      
+      const failedCount = validFiles.length - successCount;
+      toast({
+        title: failedCount === 0 ? 'Success!' : 'Partially Complete',
+        description: failedCount === 0 
+          ? `Successfully uploaded ${successCount} resume(s)`
+          : `Uploaded ${successCount} resume(s), ${failedCount} failed`,
+        variant: failedCount === 0 ? 'default' : 'destructive',
+      });
       event.target.value = '';
     } catch (error) {
-      console.error('Upload error:', error);
+      setHasError(true);
       toast({
         title: 'Upload Failed',
-        description: error instanceof Error ? error.message : 'Failed to upload resume',
+        description: error instanceof Error ? error.message : 'Failed to upload',
         variant: 'destructive',
       });
     } finally {
@@ -76,18 +214,9 @@ export const ResumeUpload = () => {
               className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-primary to-secondary hover:opacity-90 shadow-[var(--shadow-elegant)] hover:shadow-[var(--shadow-premium)] hover:scale-105 transition-all duration-300"
               asChild
             >
-              <span>
-                {uploading ? (
-                  <>
-                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <FileText className="mr-2 h-5 w-5" />
-                    Select Resume Files
-                  </>
-                )}
+              <span className="flex items-center">
+                <FileText className="mr-2 h-5 w-5" />
+                {uploading ? 'Processing...' : 'Select Resume Files'}
               </span>
             </Button>
             <input
@@ -109,6 +238,24 @@ export const ResumeUpload = () => {
           )}
         </div>
       </div>
+
+      <ProcessingLogsDialog
+        open={showLogsDialog}
+        logs={processingLogs}
+        progress={progress}
+        status={
+          uploading 
+            ? `Processing resumes... (${processedFiles}/${totalFiles} processed, ${droppedFiles} dropped)` 
+            : `Upload complete - ${processedFiles} processed, ${uploadedCount} uploaded, ${droppedFiles} dropped`
+        }
+        isComplete={isComplete}
+        hasError={hasError}
+        onClose={() => {
+          setShowLogsDialog(false);
+          setIsComplete(false);
+          setHasError(false);
+        }}
+      />
     </Card>
   );
 };

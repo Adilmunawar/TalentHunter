@@ -6,13 +6,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Utility: remove NULL bytes and other unsafe control chars while keeping tabs/newlines/carriage returns
+// Utility functions
 function sanitizeString(input: unknown, maxLen = 120_000): string | null {
   if (input === null || input === undefined) return null;
   let s = String(input);
-  // Replace all control chars except TAB(0x09), LF(0x0A), CR(0x0D)
   s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ' ');
-  // Collapse excessive spaces
   s = s.replace(/\s{3,}/g, ' ');
   if (s.length > maxLen) s = s.slice(0, maxLen);
   s = s.trim();
@@ -29,14 +27,12 @@ function sanitizeStringArray(value: unknown, maxItems = 128): string[] | null {
   }
   if (!arr.length) return null;
   if (arr.length > maxItems) arr = arr.slice(0, maxItems);
-  // de-duplicate while preserving order
   const seen = new Set<string>();
   return arr.filter((v) => (seen.has(v) ? false : (seen.add(v), true)));
 }
 
 function coerceInt(value: unknown): number | null {
   if (value === null || value === undefined) return null;
-  // Handle string or number input, remove any non-numeric characters except decimal point
   const cleaned = String(value).replace(/[^\d.-]/g, '');
   const n = parseFloat(cleaned);
   return Number.isFinite(n) && !isNaN(n) ? Math.floor(n) : null;
@@ -44,17 +40,9 @@ function coerceInt(value: unknown): number | null {
 
 function safeJsonParse(text: string): any | null {
   if (!text || typeof text !== 'string') return null;
-
-  // Remove code fences if present
   let s = text.replace(/^```json\n?|```$/gim, '').trim();
-
-  // Remove unsafe control chars
   s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ' ');
-
-  // Try direct parse
   try { return JSON.parse(s); } catch (_e) {}
-
-  // Try to extract the largest {...} block
   const start = s.indexOf('{');
   const end = s.lastIndexOf('}');
   if (start !== -1 && end !== -1 && end > start) {
@@ -86,240 +74,193 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Parse formData first
+  let formData: FormData;
+  let file: File;
+  let fileName: string;
+  
   try {
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
-    const formData = await req.formData();
-    const file = formData.get('file') as File;
-    const fileName = String(formData.get('fileName') || 'resume');
-
+    formData = await req.formData();
+    file = formData.get('file') as File;
+    fileName = String(formData.get('fileName') || 'resume');
+    
     if (!file) {
       return new Response(
         JSON.stringify({ error: 'No file provided' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-
-    console.log('Processing file:', fileName);
-
-    // Upload to storage
-    const fileExt = fileName.includes('.') ? fileName.split('.').pop() : 'bin';
-    const filePath = `${crypto.randomUUID()}.${fileExt}`;
-
-    const { data: uploadData, error: uploadError } = await supabaseClient.storage
-      .from('resumes')
-      .upload(filePath, file);
-
-    if (uploadError) {
-      console.error('Upload error:', uploadError);
-      return new Response(
-        JSON.stringify({ error: 'Failed to upload file' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Build a signed URL (bucket is private). Fallback to public URL helper if necessary.
-    let resumeUrl: string | null = null;
-    try {
-      const { data: signed } = await supabaseClient.storage
-        .from('resumes')
-        .createSignedUrl(filePath, 60 * 60 * 24 * 365); // 1 year
-      resumeUrl = signed?.signedUrl ?? null;
-    } catch (e) {
-      try {
-        const { data: { publicUrl } } = supabaseClient.storage
-          .from('resumes')
-          .getPublicUrl(filePath);
-        resumeUrl = publicUrl ?? null;
-      } catch (_) {}
-    }
-
-    // Prepare file bytes for Gemini
-    const buffer = await file.arrayBuffer();
-    // Avoid spreading large arrays into fromCharCode (causes call stack overflow)
-    const bytes = new Uint8Array(buffer);
-    let binaryStr = '';
-    const chunkSize = 0x8000; // 32KB chunks
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      const chunk = bytes.subarray(i, i + chunkSize);
-      binaryStr += String.fromCharCode(...chunk);
-    }
-    const base64Data = btoa(binaryStr);
-
-    // Determine if the file is text-like for safe fallback of resume_text
-    const isTextLike = (file.type?.startsWith('text/') === true) || /\.(txt|md|csv|json|xml)$/i.test(fileName);
-
-    // Try reading textual content only for text-like files, and SANITIZE it
-    let fileContent: string | null = null;
-    if (isTextLike) {
-      try { fileContent = sanitizeString(await file.text()); } catch (_) { fileContent = null; }
-    }
-
-    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-
-    // Extract plain text via OCR-first strategy (no JSON parsing)
-    let aiResp: Response | null = null;
-    let lastError = '';
-    const maxRetries = 5;
-    
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        aiResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: "Extract ALL readable text from this resume using OCR if needed. Return ONLY plain UTF-8 text. Do not add explanations, Markdown, or JSON. Preserve natural order; remove obvious repeated headers/footers." },
-                { inlineData: { data: base64Data, mimeType: file.type || `application/${fileExt}` } }
-              ]
-            }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 8192, responseMimeType: "text/plain" }
-          })
-        });
-
-        if (aiResp.ok) {
-          console.log('Gemini OCR success on attempt', attempt + 1);
-          break;
-        }
-
-        lastError = await aiResp.text();
-        
-        if (aiResp.status === 429 || aiResp.status === 503) {
-          const retryAfter = aiResp.headers.get('retry-after');
-          const baseDelay = Math.pow(2, attempt + 1) * 1000;
-          const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : baseDelay;
-          
-          console.log(`Gemini API ${aiResp.status} error, attempt ${attempt + 1}/${maxRetries}. Waiting ${waitTime}ms before retry...`);
-          
-          if (attempt < maxRetries - 1) {
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-            continue;
-          }
-        }
-        
-        console.error('Gemini OCR error:', aiResp.status, lastError);
-        break;
-        
-      } catch (retryError) {
-        console.error('Error during attempt', attempt + 1, ':', retryError);
-        lastError = retryError instanceof Error ? retryError.message : 'Unknown error';
-        if (attempt < maxRetries - 1) {
-          const waitTime = Math.pow(2, attempt + 1) * 1000;
-          console.log(`Waiting ${waitTime}ms before retry...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-        }
-      }
-    }
-
-    // Read plain text from model (or fallback to text-like file content)
-    let extractedText: string | null = fileContent;
-    if (aiResp && aiResp.ok) {
-      try {
-        const aiData = await aiResp.json();
-        const parts = aiData?.candidates?.[0]?.content?.parts || [];
-        let text = '';
-        for (const p of parts) {
-          if (typeof p?.text === 'string') text += p.text;
-        }
-        const cleaned = sanitizeString(text, 200_000);
-        extractedText = cleaned ?? extractedText ?? null;
-        console.log('Extracted text length:', extractedText?.length ?? 0);
-      } catch (e) {
-        console.error('Failed to read OCR text:', e);
-      }
-    } else {
-      console.error('OCR request failed after retries:', lastError);
-    }
-
-    // Build minimal profile using only resume_text
-    let parsedFromAI: any | null = null;
-
-    const profileInsert = normalizeProfile(parsedFromAI ?? {}, extractedText, resumeUrl);
-
-    // Ensure years_of_experience is a number, not a string
-    if (profileInsert.years_of_experience !== null && typeof profileInsert.years_of_experience === 'string') {
-      profileInsert.years_of_experience = coerceInt(profileInsert.years_of_experience);
-    }
-
-    console.log('Inserting profile with years_of_experience:', profileInsert.years_of_experience, 'type:', typeof profileInsert.years_of_experience);
-
-    // Try to insert, if email exists, update the existing profile
-    let profileData;
-    let insertError;
-
-    if (profileInsert.email) {
-      // Check if profile with this email exists
-      const { data: existingProfile } = await supabaseClient
-        .from('profiles')
-        .select('id')
-        .eq('email', profileInsert.email)
-        .maybeSingle();
-
-      if (existingProfile) {
-        // Update existing profile
-        console.log('Updating existing profile with id:', existingProfile.id);
-        const { data: updatedData, error: updateError } = await supabaseClient
-          .from('profiles')
-          .update(profileInsert)
-          .eq('id', existingProfile.id)
-          .select()
-          .maybeSingle();
-        
-        profileData = updatedData;
-        insertError = updateError;
-      } else {
-        // Insert new profile
-        const { data: insertedData, error: newInsertError } = await supabaseClient
-          .from('profiles')
-          .insert(profileInsert)
-          .select()
-          .maybeSingle();
-        
-        profileData = insertedData;
-        insertError = newInsertError;
-      }
-    } else {
-      // No email, just insert
-      const { data: insertedData, error: newInsertError } = await supabaseClient
-        .from('profiles')
-        .insert(profileInsert)
-        .select()
-        .maybeSingle();
-      
-      profileData = insertedData;
-      insertError = newInsertError;
-    }
-
-    if (insertError) {
-      console.error('Database error:', insertError);
-      return new Response(
-        JSON.stringify({ 
-          error: 'Failed to save profile',
-          details: insertError.message 
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log('Successfully created profile:', profileData?.id);
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        profile: profileData,
-        message: 'Resume parsed and saved successfully'
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
   } catch (error) {
-    console.error('Error in parse-resume function:', error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ error: 'Invalid request' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
+
+  // Create SSE stream
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const sendEvent = (event: string, data: any) => {
+        const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+        controller.enqueue(encoder.encode(message));
+      };
+
+      try {
+        sendEvent('log', { level: 'info', message: `Processing file: ${fileName}` });
+        console.log('Processing file:', fileName);
+
+        const supabaseClient = createClient(
+          Deno.env.get('SUPABASE_URL') ?? '',
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+        );
+
+        sendEvent('progress', { current: 1, total: 4, step: 'Uploading file...' });
+
+        // Upload to storage
+        const fileExt = fileName.split('.').pop() || 'pdf';
+        const storagePath = `resumes/${Date.now()}_${fileName}`;
+        
+        const { data: uploadData, error: uploadError } = await supabaseClient.storage
+          .from('resumes')
+          .upload(storagePath, file, {
+            contentType: file.type,
+            upsert: false
+          });
+
+        if (uploadError) {
+          sendEvent('error', { message: `Storage upload failed: ${uploadError.message}` });
+          controller.close();
+          return;
+        }
+
+        const { data: { publicUrl } } = supabaseClient.storage
+          .from('resumes')
+          .getPublicUrl(uploadData.path);
+
+        sendEvent('log', { level: 'success', message: 'File uploaded successfully' });
+        sendEvent('progress', { current: 2, total: 4, step: 'Extracting text...' });
+
+        // Extract text from PDF
+        const fileBytes = await file.arrayBuffer();
+        const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+        
+        if (!GEMINI_API_KEY) {
+          sendEvent('error', { message: 'GEMINI_API_KEY not configured' });
+          controller.close();
+          return;
+        }
+
+        sendEvent('log', { level: 'info', message: 'Parsing resume with AI...' });
+        sendEvent('progress', { current: 3, total: 4, step: 'Analyzing content...' });
+
+        // Convert ArrayBuffer to base64 in chunks to avoid stack overflow
+        const uint8Array = new Uint8Array(fileBytes);
+        let base64 = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < uint8Array.length; i += chunkSize) {
+          const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
+          base64 += String.fromCharCode(...chunk);
+        }
+        const base64Data = btoa(base64);
+
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  {
+                    inline_data: {
+                      mime_type: file.type || 'application/pdf',
+                      data: base64Data
+                    }
+                  },
+                  {
+                    text: `Extract all information from this resume and return a JSON object with these fields:\n{\n  "full_name": "string",\n  "email": "string",\n  "phone_number": "string",\n  "location": "string",\n  "job_title": "string",\n  "years_of_experience": number,\n  "sector": "string",\n  "skills": ["array", "of", "strings"],\n  "experience": "string (summary of work experience)",\n  "education": "string (summary of education)",\n  "resume_text": "string (full extracted text)"\n}\n\nReturn ONLY valid JSON, no markdown or explanations.`
+                  }
+                ]
+              }],
+              generationConfig: {
+                temperature: 0.2,
+                topK: 40,
+                topP: 0.95,
+                maxOutputTokens: 8192,
+              }
+            })
+          }
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          sendEvent('error', { message: `AI parsing failed: ${response.status}` });
+          controller.close();
+          return;
+        }
+
+        const result = await response.json();
+        const extractedText = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        
+        if (!extractedText) {
+          sendEvent('error', { message: 'Failed to extract text from resume' });
+          controller.close();
+          return;
+        }
+
+        sendEvent('log', { level: 'success', message: 'AI analysis complete' });
+        sendEvent('progress', { current: 4, total: 4, step: 'Saving to database...' });
+
+        // Get authenticated user ID from the JWT
+        const authHeader = req.headers.get('Authorization');
+        const token = authHeader?.replace('Bearer ', '');
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token || '');
+        
+        if (userError || !user) {
+          sendEvent('error', { message: 'Unable to authenticate user' });
+          controller.close();
+          return;
+        }
+
+        const parsed = safeJsonParse(extractedText);
+        const normalizedProfile = normalizeProfile(parsed, extractedText, publicUrl);
+
+        const { data: profile, error: dbError } = await supabaseClient
+          .from('profiles')
+          .insert([{ ...normalizedProfile, user_id: user.id }])
+          .select()
+          .single();
+
+        if (dbError) {
+          sendEvent('error', { message: `Database error: ${dbError.message}` });
+          controller.close();
+          return;
+        }
+
+        sendEvent('log', { level: 'success', message: 'Resume processed successfully!' });
+        sendEvent('complete', {
+          success: true,
+          profile_id: profile.id,
+          message: 'Resume uploaded and parsed successfully'
+        });
+
+        controller.close();
+
+      } catch (error) {
+        console.error('Error parsing resume:', error);
+        sendEvent('error', { message: error instanceof Error ? error.message : 'Unknown error' });
+        controller.close();
+      }
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    }
+  });
 });

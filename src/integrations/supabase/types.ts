@@ -144,6 +144,7 @@ export type Database = {
           resume_text: string | null
           sector: string | null
           skills: string[] | null
+          user_id: string | null
           years_of_experience: number | null
         }
         Insert: {
@@ -160,6 +161,7 @@ export type Database = {
           resume_text?: string | null
           sector?: string | null
           skills?: string[] | null
+          user_id?: string | null
           years_of_experience?: number | null
         }
         Update: {
@@ -176,6 +178,7 @@ export type Database = {
           resume_text?: string | null
           sector?: string | null
           skills?: string[] | null
+          user_id?: string | null
           years_of_experience?: number | null
         }
         Relationships: []

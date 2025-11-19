@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Bookmark, Mail, Phone, MapPin, Briefcase, Building2, Calendar, Trash2, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import Footer from "@/components/Footer";
 
 interface BookmarkedCandidate {
   id: string;
@@ -135,8 +136,8 @@ export default function Bookmarks() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      <div className="container mx-auto px-4 py-8 max-w-7xl">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 flex flex-col">
+      <div className="container mx-auto px-4 py-8 max-w-7xl flex-1">
         <div className="flex items-center gap-4 mb-8">
           <Button
             variant="ghost"
@@ -300,6 +301,7 @@ export default function Bookmarks() {
           </div>
         )}
       </div>
+      <Footer />
     </div>
   );
 }

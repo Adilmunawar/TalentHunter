@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Search, Calendar, Users, Trash2, Eye, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import Footer from "@/components/Footer";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -101,8 +102,8 @@ export default function SearchHistory() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      <div className="container mx-auto px-4 py-8 max-w-7xl">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5 flex flex-col">
+      <div className="container mx-auto px-4 py-8 max-w-7xl flex-1">
         <div className="flex items-center gap-4 mb-8">
           <Button
             variant="ghost"
@@ -197,6 +198,7 @@ export default function SearchHistory() {
           </div>
         )}
       </div>
+      <Footer />
     </div>
   );
 }

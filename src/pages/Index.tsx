@@ -8,6 +8,7 @@ import { Users, Upload, LogOut, Bookmark, History } from 'lucide-react';
 import talentProLogo from '@/assets/talent-pro-logo.png';
 import { useAuth } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
+import Footer from '@/components/Footer';
 
 const Index = () => {
   const { user, loading, signOut } = useAuth();
@@ -32,7 +33,7 @@ const Index = () => {
   }
 
   return (
-    <div className="min-h-screen relative overflow-hidden animate-fade-in">
+    <div className="min-h-screen relative overflow-hidden animate-fade-in flex flex-col">
       {/* Animated Background */}
       <div className="absolute inset-0 bg-gradient-to-br from-background via-background to-muted/20">
         <div className="absolute inset-0 bg-mesh" />
@@ -43,14 +44,14 @@ const Index = () => {
         <div className="absolute top-1/2 left-1/2 w-64 h-64 bg-accent/10 rounded-full blur-3xl animate-pulse-glow" />
       </div>
       
-      <div className="container mx-auto px-4 py-8 max-w-7xl relative z-10">
+      <div className="container mx-auto px-4 py-8 max-w-7xl relative z-10 flex-1">
         <header className="mb-12 text-center space-y-4">
           <div className="inline-flex items-center justify-center mb-6 relative">
             <div className="absolute inset-0 bg-primary/20 rounded-full blur-2xl animate-pulse-glow" />
-            <img src={talentProLogo} alt="Talent Pro Logo" className="h-24 w-auto relative z-10 drop-shadow-2xl" />
+            <img src={talentProLogo} alt="AdiLink Logo" className="h-24 w-auto relative z-10 drop-shadow-2xl" />
           </div>
           <h1 className="text-5xl md:text-6xl font-bold text-foreground bg-clip-text text-transparent bg-gradient-to-r from-primary via-secondary to-accent animate-fade-in">
-            Talent Radar
+            AdiLink
           </h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
             AI-Powered Recruitment Platform - Upload resumes, store candidate data, and find the perfect match with intelligent ranking
@@ -92,22 +93,32 @@ const Index = () => {
         </header>
 
         <Tabs defaultValue="upload" className="space-y-8">
-          <TabsList className="grid w-full max-w-md mx-auto grid-cols-2 h-14 bg-card/50 backdrop-blur-sm border border-primary/20 shadow-[var(--shadow-elegant)]">
-            <TabsTrigger 
-              value="upload" 
-              className="text-base data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg transition-all"
+          <div className="flex flex-col md:flex-row items-center justify-center gap-4">
+            <TabsList className="grid w-full max-w-md grid-cols-2 h-14 bg-card/50 backdrop-blur-sm border border-primary/20 shadow-[var(--shadow-elegant)]">
+              <TabsTrigger 
+                value="upload" 
+                className="text-base data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg transition-all"
+              >
+                <Upload className="h-5 w-5 mr-2" />
+                Upload Resumes
+              </TabsTrigger>
+              <TabsTrigger 
+                value="hunt" 
+                className="text-base data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg transition-all"
+              >
+                <Users className="h-5 w-5 mr-2" />
+                Find Candidates
+              </TabsTrigger>
+            </TabsList>
+            <Button
+              variant="outline"
+              onClick={() => navigate('/candidates')}
+              className="h-14 px-6 gap-2 bg-card/50 backdrop-blur-sm hover:bg-primary/10 border-primary/30 shadow-[var(--shadow-elegant)]"
             >
-              <Upload className="h-5 w-5 mr-2" />
-              Upload Resumes
-            </TabsTrigger>
-            <TabsTrigger 
-              value="hunt" 
-              className="text-base data-[state=active]:bg-gradient-to-r data-[state=active]:from-primary data-[state=active]:to-secondary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg transition-all"
-            >
-              <Users className="h-5 w-5 mr-2" />
-              Find Candidates
-            </TabsTrigger>
-          </TabsList>
+              <Users className="h-5 w-5" />
+              All Candidates
+            </Button>
+          </div>
 
           <TabsContent value="upload" className="space-y-6">
             <ResumeUpload />
@@ -118,6 +129,7 @@ const Index = () => {
           </TabsContent>
         </Tabs>
       </div>
+      <Footer />
     </div>
   );
 };
